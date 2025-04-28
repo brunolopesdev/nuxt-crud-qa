@@ -10,49 +10,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout da branch da PR
+      - name: Checkout do repositório de QA
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Pega o histórico completo
           ref: ${{ github.event.pull_request.head.ref }}
 
-      - name: Instalar GH CLI
-        run: |
-          sudo apt update
-          sudo apt install gh -y
+      - name: Adicionar repositório de produção como remoto
+        run: git remote add prod https://x-access-token:${{ secrets.API_TOKEN_GITHUB }}@github.com/brunolopesdev/nuxt-crud.git
 
-      - name: Autenticar no GitHub CLI
+      - name: Push da branch para produção
         run: |
-          echo "${{ secrets.API_TOKEN_GITHUB }}" | gh auth login --with-token
+          git push prod ${{ github.event.pull_request.head.ref }}:${{ github.event.pull_request.head.ref }}
 
-      - name: Criar a branch no repositório de produção via API
-        env:
-          REPO: brunolopesdev/nuxt-crud
-          BRANCH: ${{ github.event.pull_request.head.ref }}
-          BASE: master
-          GITHUB_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
+      - name: Criar Pull Request no repositório de produção
         run: |
-          # Verifica se a branch já existe
-          if gh api repos/$REPO/git/refs/heads/$BRANCH; then
-            echo "Branch $BRANCH já existe no repositório de produção. Ignorando criação."
-          else
-            echo "Criando a branch $BRANCH no repositório de produção..."
-            # Pega o SHA da branch base (master) no repositório de produção
-            BASE_SHA=$(gh api repos/$REPO/git/ref/heads/$BASE --jq .object.sha)
-            # Cria a nova branch no repo de produção
-            gh api repos/$REPO/git/refs -f ref="refs/heads/$BRANCH" -f sha="$BASE_SHA"
-          fi
-
-      - name: Criar a Pull Request no repositório de produção
-        env:
-          REPO: brunolopesdev/nuxt-crud
-          BRANCH: ${{ github.event.pull_request.head.ref }}
-          GITHUB_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
-        run: |
-          echo "Criando PR de $BRANCH para master no repositório de produção..."
-          gh pr create --repo $REPO \
-            --head $BRANCH \
+          gh pr create \
+            --repo brunolopesdev/nuxt-crud \
+            --head ${{ github.event.pull_request.head.ref }} \
             --base master \
             --title "${{ github.event.pull_request.title }}" \
-            --body "**Replicação automática da PR aprovada em QA**\n\nPR original: ${{ github.event.pull_request.html_url }}\nAprovada por: ${{ github.event.review.user.login }}\nData de aprovação: ${{ github.event.review.submitted_at }}\n\n${{ github.event.pull_request.body }}" \
-            --reviewer "tech-lead,product-owner" || echo "PR já existente ou erro leve, ignorado."
+            --body "**Replicação automática da PR aprovada em QA**%0A%0APR original: ${{ github.event.pull_request.html_url }}%0AAprovada por: ${{ github.event.review.user.login }}%0AData de aprovação: ${{ github.event.review.submitted_at }}%0A%0A${{ github.event.pull_request.body }}"
+        env:
+          GH_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}

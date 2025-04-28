@@ -21,3 +21,10 @@ export interface UserGroup {
   descricao: string
   users: User[]
 }
+
+export interface esaehuashuesahu {
+  id: number;
+  nome: string;
+  descricao: string;
+  users: User[];
+}

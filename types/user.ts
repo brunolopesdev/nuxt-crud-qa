@@ -6,3 +6,11 @@ export interface User {
   email: string
   grupo: string
 }
+
+export interface User {
+  id: number
+  nome: string
+  cpf: string
+  username: string
+  email: string
+}

@@ -3,19 +3,19 @@
     <div class="header">
       <h2>Lista de Usuários</h2>
       <button @click="$router.push('/user/new')" class="btn-add">
-        Adicionar Usuário
+        Adicionar Usuário Teste
       </button>
     </div>
 
     <table>
       <thead>
         <tr>
-          <th>Nome</th>
-          <th>CPF</th>
-          <th>Username</th>
-          <th>Email</th>
-          <th>Grupo</th>
-          <th>Ações</th>
+          <th>Nome Teste</th>
+          <th>CPF Teste</th>
+          <th>Username Teste</th>
+          <th>Email Teste</th>
+          <th>Grupo Teste</th>
+          <th>Ações Teste</th>
         </tr>
       </thead>
       <tbody>

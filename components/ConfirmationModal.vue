@@ -3,8 +3,8 @@
     <div class="modal">
       <p>{{ message }}</p>
       <div class="modal-actions">
-        <button @click="$emit('confirm')" class="btn-confirm">Confirmar</button>
-        <button @click="$emit('cancel')" class="btn-cancel">Cancelar</button>
+        <button @click="$emit('confirm')" class="btn-confirm">Confirmar Teste</button>
+        <button @click="$emit('cancel')" class="btn-cancel">Cancelar Teste</button>
       </div>
     </div>
   </div>

@@ -14,10 +14,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Fetch all history for all branches and tags
+          token: ${{ secrets.API_TOKEN_GITHUB }}
 
       - name: Set up Git config
         run: |
-          git config --global user.name "GitHub Actions Bot"
+          git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
       - name: Extract PR information
@@ -26,38 +27,67 @@ jobs:
           echo "pr_title=$(echo '${{ github.event.pull_request.title }}')" >> $GITHUB_OUTPUT
           echo "pr_branch=$(echo '${{ github.event.pull_request.head.ref }}')" >> $GITHUB_OUTPUT
           echo "pr_number=$(echo '${{ github.event.pull_request.number }}')" >> $GITHUB_OUTPUT
+          echo "PR Title: ${{ github.event.pull_request.title }}"
+          echo "PR Branch: ${{ github.event.pull_request.head.ref }}"
+          echo "PR Number: ${{ github.event.pull_request.number }}"
 
-      - name: Add production repository as remote
+      - name: Clone production repository
         run: |
-          git remote add production https://${{ secrets.API_TOKEN_GITHUB }}@github.com/brunolopesdev/nuxt-crud.git
+          echo "Cloning production repository..."
+          git clone https://${{ secrets.API_TOKEN_GITHUB }}@github.com/brunolopesdev/nuxt-crud.git /tmp/prod-repo
+          cd /tmp/prod-repo
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
 
-      - name: Create and push branch to production
+      - name: Sync changes and create branch in production
         run: |
-          # Get the changes from the PR
-          git checkout ${{ github.event.pull_request.head.ref }}
+          # Check if we need to create a new branch
+          export BRANCH_NAME="${{ steps.pr_info.outputs.pr_branch }}"
+          echo "Creating/updating branch: $BRANCH_NAME"
 
-          # Create the same branch in production repo
-          git push production ${{ github.event.pull_request.head.ref }}:${{ github.event.pull_request.head.ref }}
+          # Copy all files from QA repo to production repo
+          echo "Syncing files between repositories..."
+          rsync -av --exclude='.git/' --exclude='.github/' . /tmp/prod-repo/
+
+          # Create branch and commit in production repo
+          cd /tmp/prod-repo
+          git checkout -b $BRANCH_NAME || git checkout $BRANCH_NAME
+
+          # Check if there are changes to commit
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            echo "Committing changes..."
+            git add .
+            git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+            git push origin $BRANCH_NAME
+          fi
 
       - name: Create PR in production repository
-        uses: peter-evans/create-pull-request@v5
-        with:
-          token: ${{ secrets.API_TOKEN_GITHUB }}
-          path: .
-          commit-message: "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
-          committer: GitHub Actions Bot <actions@github.com>
-          author: GitHub Actions Bot <actions@github.com>
-          branch: ${{ steps.pr_info.outputs.pr_branch }}
-          base: master
-          title: "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
-          body: |
-            **Automated PR created by GitHub Actions**
-
-            This PR was automatically created to sync changes from the QA repository.
-
-            Original PR: #${{ steps.pr_info.outputs.pr_number }}
-            Original PR Title: ${{ steps.pr_info.outputs.pr_title }}
-            Approved by: ${{ github.event.review.user.login }}
-          repository: brunolopesdev/nuxt-crud
         env:
-          GITHUB_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
+          GH_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
+        run: |
+          # Check if PR already exists
+          cd /tmp/prod-repo
+          echo "Checking if PR already exists..."
+          PR_EXISTS=$(gh pr list --head ${{ steps.pr_info.outputs.pr_branch }} --json number | jq '. | length')
+          echo "PR exists check result: $PR_EXISTS"
+
+          if [ "$PR_EXISTS" -eq "0" ]; then
+            echo "Creating new PR in production repository..."
+            gh pr create \
+              --title "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}" \
+              --body "**Automated PR created by GitHub Actions**
+
+          This PR was automatically created to sync changes from the QA repository.
+
+          Original PR: #${{ steps.pr_info.outputs.pr_number }}
+          Original PR Title: ${{ steps.pr_info.outputs.pr_title }}
+          Approved by: ${{ github.event.review.user.login }}" \
+              --repo brunolopesdev/nuxt-crud \
+              --base master \
+              --head ${{ steps.pr_info.outputs.pr_branch }}
+            echo "PR created successfully"
+          else
+            echo "PR already exists in production repository"
+          fi

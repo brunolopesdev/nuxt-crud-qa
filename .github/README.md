@@ -11,9 +11,10 @@ Quando uma Pull Request é revisada e aprovada no repositório de QA, um workflo
 1. Uma PR é criada no repositório de QA
 2. Quando a PR é revisada e aprovada por qualquer revisor, o GitHub Actions é acionado imediatamente
 3. O workflow extrai as informações da PR original (título, número e branch)
-4. O workflow cria a mesma branch no repositório de produção
-5. Uma nova PR é automaticamente criada no repositório de produção com o mesmo título da PR original (prefixado com "[Sync from QA]")
-6. A descrição da PR incluirá o nome do revisor que aprovou a PR no repositório de QA
+4. O workflow clona o repositório de produção e cria/atualiza a mesma branch
+5. As alterações são sincronizadas do repositório de QA para o de produção
+6. Uma nova PR é automaticamente criada no repositório de produção (se ainda não existir) com o mesmo título da PR original (prefixado com "[Sync from QA]")
+7. A descrição da PR incluirá o nome do revisor que aprovou a PR no repositório de QA
 
 ## Configuração
 
@@ -37,7 +38,9 @@ Para criar um PAT:
 
 ## Observações Importantes
 
-- O workflow é acionado para cada aprovação de PR, mesmo antes dela ser mesclada
+- O workflow é acionado para cada aprovação de PR, mesmo antes dela ser mesclada no QA
+- Se você aprovar a mesma PR várias vezes, o workflow será executado novamente, mas não criará PRs duplicadas
+- Se não houver alterações entre as aprovações, o workflow detectará isso e não fará commits desnecessários
 - A PR criada no repositório de produção terá o mesmo título da PR original, prefixado com "[Sync from QA]"
 - A branch criada no repositório de produção terá o mesmo nome da branch original no repositório de QA
 - A descrição da PR incluirá referências à PR original e quem a aprovou

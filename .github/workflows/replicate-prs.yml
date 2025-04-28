@@ -1,8 +1,18 @@
 name: Replicar PR para Produção
 
+# Este workflow requer um PAT (Personal Access Token) com permissões apenas no repositório de produção:
+# - Permissão de "Contents: write" (para criar branches)
+# - Permissão de "Pull Requests: write" (para criar PRs)
+# O token deve ter acesso somente ao repositório brunolopesdev/nuxt-crud
+# Armazene o token nos secrets do repositório como API_TOKEN_GITHUB
+
 on:
   pull_request_review:
     types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   replicar-para-prod:
@@ -16,21 +26,38 @@ jobs:
           fetch-depth: 0  # Pega o histórico completo
           ref: ${{ github.event.pull_request.head.ref }}
 
-      - name: Adicionar repositório de produção como remoto
+      - name: Configurar Git
         run: |
-          git remote add prod https://x-access-token:${{ secrets.API_TOKEN_GITHUB }}@github.com/brunolopesdev/nuxt-crud.git
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
 
-      - name: Fazer o push da branch para produção
+      - name: Adicionar repositório de produção como remoto e fazer push
+        env:
+          GH_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
         run: |
+          git remote add prod https://oauth2:${GH_TOKEN}@github.com/brunolopesdev/nuxt-crud.git
           git push prod ${{ github.event.pull_request.head.ref }}:${{ github.event.pull_request.head.ref }}
 
+      - name: Instalar GitHub CLI
+        run: |
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh
+
       - name: Criar Pull Request no repositório de produção
+        env:
+          GH_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
         run: |
           gh pr create \
             --repo brunolopesdev/nuxt-crud \
             --head ${{ github.event.pull_request.head.ref }} \
             --base master \
             --title "${{ github.event.pull_request.title }}" \
-            --body "**Replicação automática da PR aprovada em QA**%0A%0APR original: ${{ github.event.pull_request.html_url }}%0AAprovada por: ${{ github.event.review.user.login }}%0AData de aprovação: ${{ github.event.review.submitted_at }}%0A%0A${{ github.event.pull_request.body }}"
-        env:
-          GH_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
+            --body "**Replicação automática da PR aprovada em QA**
+
+          PR original: ${{ github.event.pull_request.html_url }}
+          Aprovada por: ${{ github.event.review.user.login }}
+          Data de aprovação: ${{ github.event.review.submitted_at }}
+
+          ${{ github.event.pull_request.body }}"

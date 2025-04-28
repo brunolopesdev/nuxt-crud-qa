@@ -159,9 +159,9 @@ jobs:
 
             # Force a commit with a placeholder file to ensure we can create a PR
             echo "Criando commit placeholder para garantir a criação da PR"
-            echo "Esta é uma sincronização automática da PR #${{ steps.pr_info.outputs.pr_number }}" > sync-from-qa.md
+            echo "Esta é uma sincronização automática da PR #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}" > sync-from-qa.md
             git add sync-from-qa.md
-            git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+            git commit -m "[Sync from QA] ${{ steps.pr_info.outputs.pr_title }} (#${{ steps.pr_info.outputs.pr_number }})"
           else
             echo "Alterações detectadas, aplicando commits originais"
 
@@ -190,7 +190,7 @@ jobs:
                 echo "Múltiplos commits detectados ($COMMIT_COUNT), criando commit único com referências"
 
                 # Create commit message with all original commits
-                COMMIT_MSG="[Sync from QA] Multiple commits from PR #${{ steps.pr_info.outputs.pr_number }}:\n\n"
+                COMMIT_MSG="[Sync from QA] ${{ steps.pr_info.outputs.pr_title }} (#${{ steps.pr_info.outputs.pr_number }}):\n\n"
 
                 while read HASH; do
                   SUBJECT=$(cat "/tmp/qa_commits/$HASH.subject")
@@ -204,7 +204,7 @@ jobs:
             else
               echo "Nenhuma informação de commit encontrada, realizando commit único"
               git add -A
-              git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+              git commit -m "[Sync from QA] ${{ steps.pr_info.outputs.pr_title }} (#${{ steps.pr_info.outputs.pr_number }})"
             fi
           fi
 
@@ -246,7 +246,7 @@ jobs:
 
             # Create PR with properly escaped body
             gh pr create \
-              --title "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}" \
+              --title "[Sync from QA] ${{ steps.pr_info.outputs.pr_title }} (#${{ steps.pr_info.outputs.pr_number }})" \
               --body "$PR_BODY" \
               --repo brunolopesdev/nuxt-crud \
               --base master \

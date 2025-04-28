@@ -1,0 +1,204 @@
+name: Sync to Production Repo
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  sync-to-production:
+    if: github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout QA repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for all branches and tags
+          token: ${{ secrets.API_TOKEN_GITHUB }}
+          ref: ${{ github.event.pull_request.head.ref }} # Checkout the PR branch explicitly
+
+      - name: Debug checkout
+        run: |
+          echo "Verificando checkout do QA repository"
+          echo "Current branch: $(git branch --show-current)"
+          echo "Latest commit: $(git log -1 --pretty=format:'%h - %s')"
+          echo "Remote URL: $(git remote get-url origin)"
+          echo "Files in current workspace:"
+          ls -la
+
+      - name: Get changed files
+        id: changed_files
+        run: |
+          # Ensure we have master branch for comparison
+          git fetch origin master
+
+          # Get list of changed files between the PR branch and master
+          echo "Obtendo arquivos modificados entre master e a branch atual"
+          git diff --name-only origin/master..HEAD > /tmp/changed_files.txt
+
+          # Display changed files
+          echo "Arquivos modificados:"
+          cat /tmp/changed_files.txt
+
+          # Store count of changed files
+          CHANGED_FILES_COUNT=$(cat /tmp/changed_files.txt | wc -l)
+          echo "Número de arquivos modificados: $CHANGED_FILES_COUNT"
+          echo "changed_files_count=$CHANGED_FILES_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Extract PR information
+        id: pr_info
+        run: |
+          echo "pr_title=$(echo '${{ github.event.pull_request.title }}')" >> $GITHUB_OUTPUT
+          echo "pr_branch=$(echo '${{ github.event.pull_request.head.ref }}')" >> $GITHUB_OUTPUT
+          echo "pr_number=$(echo '${{ github.event.pull_request.number }}')" >> $GITHUB_OUTPUT
+          echo "PR Title: ${{ github.event.pull_request.title }}"
+          echo "PR Branch: ${{ github.event.pull_request.head.ref }}"
+          echo "PR Number: ${{ github.event.pull_request.number }}"
+
+      - name: Prepare workspace
+        run: |
+          # Create a temporary directory to store the changed files
+          echo "Criando diretório temporário para arquivos modificados"
+          mkdir -p /tmp/changed_content
+
+          # Copy all changed files to the temporary directory
+          while read file; do
+            if [ -f "$file" ]; then
+              echo "Copiando arquivo modificado: $file"
+              mkdir -p /tmp/changed_content/$(dirname "$file")
+              cp "$file" /tmp/changed_content/"$file"
+            fi
+          done < /tmp/changed_files.txt
+
+          # List the content of the temporary directory
+          echo "Conteúdo do diretório temporário:"
+          find /tmp/changed_content -type f | sort
+
+          # Get a complete snapshot of the current workspace
+          echo "Criando snapshot completo do workspace atual"
+          tar -czf /tmp/qa_snapshot.tar.gz --exclude='.git' --exclude='.github' --exclude='node_modules' .
+
+      - name: Clone production repository
+        run: |
+          echo "Clonando repositório de produção"
+          git clone https://${{ secrets.API_TOKEN_GITHUB }}@github.com/brunolopesdev/nuxt-crud.git /tmp/prod-repo
+          cd /tmp/prod-repo
+
+          # Configure Git
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          # Show info about the repository
+          echo "Repositório de produção:"
+          echo "Remote URL: $(git remote get-url origin)"
+          echo "Default branch: $(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')"
+
+      - name: Apply changes to production repository
+        id: apply_changes
+        run: |
+          # Set variables
+          export BRANCH_NAME="${{ steps.pr_info.outputs.pr_branch }}"
+          echo "Trabalhando com a branch: $BRANCH_NAME"
+
+          # Navigate to production repository
+          cd /tmp/prod-repo
+
+          # Prepare branch in production repository
+          if git ls-remote --heads origin $BRANCH_NAME | grep -q $BRANCH_NAME; then
+            echo "Branch $BRANCH_NAME já existe, atualizando"
+            git checkout $BRANCH_NAME
+            git pull origin $BRANCH_NAME
+          else
+            echo "Criando nova branch $BRANCH_NAME"
+            git checkout -b $BRANCH_NAME
+          fi
+
+          # Apply changes using two methods
+
+          # Method 1: Copy specific changed files
+          echo "Método 1: Copiando arquivos específicos que foram alterados"
+          if [ -d "/tmp/changed_content" ] && [ "$(ls -A /tmp/changed_content)" ]; then
+            echo "Copiando arquivos alterados para o repositório de produção"
+            cp -R /tmp/changed_content/. .
+            echo "Verificando arquivos copiados:"
+            git status --porcelain
+          else
+            echo "Nenhum arquivo alterado encontrado para copiar"
+          fi
+
+
+          # Method 2: Extract full snapshot and apply on top
+          echo "Método 2: Aplicando snapshot completo do repositório QA"
+          if [ -f "/tmp/qa_snapshot.tar.gz" ]; then
+            echo "Extraindo snapshot e aplicando no repositório de produção"
+
+            # Extract to a temporary directory first
+            mkdir -p /tmp/qa_extracted
+            tar -xzf /tmp/qa_snapshot.tar.gz -C /tmp/qa_extracted
+
+            # Copy content, preserving directory structure
+            cp -R /tmp/qa_extracted/. .
+
+            echo "Verificando estado após aplicar snapshot:"
+            git status --porcelain
+          else
+            echo "Arquivo de snapshot não encontrado"
+          fi
+
+          # Commit changes to production repository
+          echo "Commitando alterações no repositório de produção"
+          git add -A
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "Nenhuma alteração detectada para commit"
+
+            # Force a commit with a placeholder file to ensure we can create a PR
+            echo "Criando commit placeholder para garantir a criação da PR"
+            echo "Esta é uma sincronização automática da PR #${{ steps.pr_info.outputs.pr_number }}" > sync-from-qa.md
+            git add sync-from-qa.md
+            git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+          else
+            echo "Alterações detectadas, realizando commit"
+            git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+          fi
+
+          # Push changes to production repository
+          echo "Pushing changes to production branch: $BRANCH_NAME"
+          git push origin $BRANCH_NAME
+
+          # Verify the branch has commits compared to master
+          git fetch origin master
+          COMMIT_COUNT=$(git rev-list --count origin/master..$BRANCH_NAME)
+          echo "Número de commits entre master e $BRANCH_NAME: $COMMIT_COUNT"
+
+          echo "SUCCESS=true" >> $GITHUB_OUTPUT
+
+      - name: Create PR in production repository
+        env:
+          GH_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
+        run: |
+          # Check if PR already exists
+          cd /tmp/prod-repo
+          echo "Verificando se a PR já existe..."
+          PR_EXISTS=$(gh pr list --head ${{ steps.pr_info.outputs.pr_branch }} --json number | jq '. | length')
+          echo "Resultado da verificação: $PR_EXISTS"
+
+          # Create the PR body as a single line with escaped newlines
+          PR_BODY="**Automated PR created by GitHub Actions**\n\nThis PR was automatically created to sync changes from the QA repository.\n\nOriginal PR: #${{ steps.pr_info.outputs.pr_number }}\nOriginal PR Title: ${{ steps.pr_info.outputs.pr_title }}\nApproved by: ${{ github.event.review.user.login }}"
+
+          if [ "$PR_EXISTS" -eq "0" ]; then
+            echo "Criando nova PR no repositório de produção..."
+
+            # Create PR with properly escaped body
+            gh pr create \
+              --title "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}" \
+              --body "$PR_BODY" \
+              --repo brunolopesdev/nuxt-crud \
+              --base master \
+              --head ${{ steps.pr_info.outputs.pr_branch }}
+
+            echo "PR criada com sucesso"
+          else
+            echo "PR já existe no repositório de produção"
+          fi

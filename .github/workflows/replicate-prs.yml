@@ -17,9 +17,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Adicionar repositório de produção como remoto
-        run: git remote add prod https://x-access-token:${{ secrets.API_TOKEN_GITHUB }}@github.com/brunolopesdev/nuxt-crud.git
+        run: |
+          git remote add prod https://x-access-token:${{ secrets.API_TOKEN_GITHUB }}@github.com/brunolopesdev/nuxt-crud.git
 
-      - name: Push da branch para produção
+      - name: Fazer o push da branch para produção
         run: |
           git push prod ${{ github.event.pull_request.head.ref }}:${{ github.event.pull_request.head.ref }}
 

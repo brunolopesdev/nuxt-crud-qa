@@ -148,13 +148,12 @@ jobs:
             exit 1
           fi
 
-          # Check if there are changes to commit
-          if git diff --staged --quiet && git status --porcelain | grep -q "^??"; then
-            # We have untracked files but no staged changes
-            git add -A
-          fi
+          # Always add all changes to staging
+          echo "Adicionando todas as alterações para o commit"
+          git add -A
 
-          if git diff --staged --quiet && ! git status --porcelain | grep -q "^??"; then
+          # Check if there are changes to commit after git add
+          if git diff --cached --quiet; then
             echo "Nenhuma alteração detectada para commit"
 
             # Force a commit with a placeholder file to ensure we can create a PR
@@ -179,7 +178,6 @@ jobs:
                 SUBJECT=$(cat "/tmp/qa_commits/$HASH.subject")
                 BODY=$(cat "/tmp/qa_commits/$HASH.body")
 
-                git add -A
                 if [ -s "/tmp/qa_commits/$HASH.body" ]; then
                   git commit -m "[Sync from QA] $SUBJECT" -m "$BODY"
                 else
@@ -197,13 +195,11 @@ jobs:
                   COMMIT_MSG="${COMMIT_MSG}* ${HASH:0:7}: $SUBJECT\n"
                 done < "/tmp/qa_commit_hashes.txt"
 
-                # Add all files and create single commit
-                git add -A
+                # Create single commit with combined message
                 git commit -m "$(echo -e "$COMMIT_MSG")"
               fi
             else
               echo "Nenhuma informação de commit encontrada, realizando commit único"
-              git add -A
               git commit -m "[Sync from QA] ${{ steps.pr_info.outputs.pr_title }} (#${{ steps.pr_info.outputs.pr_number }})"
             fi
           fi

@@ -8,20 +8,35 @@ jobs:
   replicar-para-prod:
     if: github.event.review.state == 'approved'
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout do código
+      - name: Checkout da branch da PR
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref }}
 
-      - name: Criar PR no repositório de produção
+      - name: Configurar Git
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+      - name: Adicionar remoto do repositório de produção
+        run: |
+          git remote add destino https://x-access-token:${{ secrets.API_TOKEN_GITHUB }}@github.com/brunolopesdev/nuxt-crud.git
+
+      - name: Push da branch para repositório de produção (criando se necessário)
+        run: |
+          # Faz push da branch para o repo de produção
+          git push --force-with-lease destino ${{ github.event.pull_request.head.ref }}:${{ github.event.pull_request.head.ref }}
+
+      - name: Criar Pull Request no repositório de produção
         uses: repo-sync/pull-request@v2
         with:
           source_branch: ${{ github.event.pull_request.head.ref }}
           destination_repository: "brunolopesdev/nuxt-crud"
           destination_branch: "master"
-          pr_title: "${{ github.event.pull_request.title }}"
+          pr_title: "${{ github.event.pull_request.title }}" # Mantém o mesmo título da PR original
           pr_body: |
             **Replicação automática da PR aprovada em QA**
 
@@ -30,5 +45,5 @@ jobs:
             Data de aprovação: ${{ github.event.review.submitted_at }}
 
             ${{ github.event.pull_request.body }}
-          pr_reviewer: "tech-lead,product-owner"
+          pr_reviewer: "tech-lead,product-owner" # Ajuste para os reviewers desejados
           github_token: ${{ secrets.API_TOKEN_GITHUB }}

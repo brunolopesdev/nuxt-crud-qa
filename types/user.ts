@@ -14,3 +14,10 @@ export interface User {
   username: string
   email: string
 }
+
+export interface UserGroup {
+  id: number
+  nome: string
+  descricao: string
+  users: User[]
+}

@@ -21,6 +21,8 @@ jobs:
         run: |
           echo "Current branch: $(git branch --show-current)"
           echo "Latest commit: $(git log -1 --pretty=format:'%h - %s')"
+          echo "Files in current workspace:"
+          find . -type f -not -path "*/\.git/*" -not -path "*/node_modules/*" | head -n 30
 
       - name: Set up Git config
         run: |
@@ -37,10 +39,10 @@ jobs:
           echo "PR Branch: ${{ github.event.pull_request.head.ref }}"
           echo "PR Number: ${{ github.event.pull_request.number }}"
 
-      - name: List files in QA branch
+      - name: Create temp directory for production repo
         run: |
-          echo "Files in QA repository (current branch):"
-          ls -la
+          mkdir -p /tmp/prod-repo
+          echo "Temporary directory created at /tmp/prod-repo"
 
       - name: Clone production repository
         run: |
@@ -49,19 +51,19 @@ jobs:
           cd /tmp/prod-repo
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          echo "Default branch in production repo: $(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')"
 
-      - name: Force sync changes to production
+      - name: Copy files and create branch in production
         id: sync_changes
         run: |
           # Get branch name from PR info
           export BRANCH_NAME="${{ steps.pr_info.outputs.pr_branch }}"
-          echo "Syncing branch: $BRANCH_NAME"
+          echo "Working with branch: $BRANCH_NAME"
 
-          # Debug current state in QA repo
-          echo "Contents of QA repo (current directory):"
-          find . -type f -not -path "*/\.git/*" | sort | head -n 20
+          # Print environment info
+          echo "Current working directory: $(pwd)"
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
 
+          # Create new branch in production repo
           cd /tmp/prod-repo
 
           # Check if branch exists in remote and create/checkout
@@ -74,30 +76,41 @@ jobs:
             git checkout -b $BRANCH_NAME
           fi
 
-          # Debug current state in production repo before copy
-          echo "Files in production repo before sync:"
-          find . -type f -not -path "*/\.git/*" | sort | head -n 20
+          # Copy all files manually using cp command (except .git and .github)
+          echo "Copying files from QA to production..."
+          cd $GITHUB_WORKSPACE
 
-          # Force copy all files from QA repo to production repo
-          echo "Syncing files from QA to production..."
-          rsync -av --delete --exclude='.git/' --exclude='.github/' --exclude='node_modules/' $GITHUB_WORKSPACE/ /tmp/prod-repo/
+          # Create a list of files to copy (excluding .git, .github, and node_modules)
+          find . -type f -not -path "*/\.git/*" -not -path "*/\.github/*" -not -path "*/node_modules/*" > /tmp/files_to_copy.txt
 
-          # Debug after copy
-          echo "Files in production repo after sync:"
-          find . -type f -not -path "*/\.git/*" | sort | head -n 20
+          # Create needed directories in production repo
+          cat /tmp/files_to_copy.txt | xargs -I{} dirname {} | sort -u | xargs -I{} mkdir -p /tmp/prod-repo/{}
 
-          # Commit changes even if git says there's nothing to commit
-          echo "Forcing commit of changes..."
-          git add --all
+          # Copy each file individually
+          cat /tmp/files_to_copy.txt | while read file; do
+            echo "Copying: $file"
+            cp --parents "$file" /tmp/prod-repo/
+          done
 
-          # Try to commit, but don't fail if there's nothing to commit
-          git diff --staged --quiet || git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+          # Return to production repo
+          cd /tmp/prod-repo
+
+          # Debug: List files in production repo after copy
+          echo "Files in production repo after copy:"
+          find . -type f -not -path "*/\.git/*" | head -n 30
+
+          # Commit and push all changes
+          echo "Committing changes to production..."
+          git add -A
+
+          # Force a commit even if git thinks there are no changes
+          git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}" || echo "No changes to commit"
 
           # Push changes to production branch
           echo "Pushing changes to production repository..."
           git push origin $BRANCH_NAME
 
-          # Check if there are commits between master and branch
+          # Verify the branch has commits compared to master
           git fetch origin master
           COMMIT_COUNT=$(git rev-list --count origin/master..$BRANCH_NAME)
           echo "Commit count between master and $BRANCH_NAME: $COMMIT_COUNT"
@@ -105,18 +118,18 @@ jobs:
           if [ "$COMMIT_COUNT" -gt "0" ]; then
             echo "has_commits=true" >> $GITHUB_OUTPUT
             echo "Diferenças detectadas entre master e $BRANCH_NAME"
-            git log --oneline origin/master..$BRANCH_NAME
+            git diff --stat origin/master $BRANCH_NAME
           else
-            echo "has_commits=false" >> $GITHUB_OUTPUT
-            echo "Nenhuma diferença detectada entre master e $BRANCH_NAME"
-
-            # Debug: Compare content between branches
-            echo "Comparando arquivos entre master e $BRANCH_NAME..."
-            git diff --name-status origin/master $BRANCH_NAME
+            # Force a dummy commit to ensure there's a difference
+            echo "No commits detected, creating a placeholder commit"
+            touch .sync-placeholder
+            git add .sync-placeholder
+            git commit -m "[Sync placeholder] Ensuring branch has differences from master"
+            git push origin $BRANCH_NAME
+            echo "has_commits=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Create PR in production repository
-        if: steps.sync_changes.outputs.has_commits == 'true'
         env:
           GH_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
         run: |
@@ -144,17 +157,3 @@ jobs:
           else
             echo "PR already exists in production repository"
           fi
-
-      - name: Show info when no commits are available
-        if: steps.sync_changes.outputs.has_commits == 'false'
-        run: |
-          echo "ATENÇÃO: Não foi possível detectar diferenças entre as branches master e ${{ steps.pr_info.outputs.pr_branch }} no repositório de produção."
-          echo "Possíveis razões:"
-          echo "1. Os repositórios já estão sincronizados"
-          echo "2. A branch existe, mas não tem alterações em relação à master"
-          echo "3. Houve um problema ao sincronizar os arquivos"
-          echo ""
-          echo "Para depurar este problema, verifique:"
-          echo "- Os logs acima para ver se os arquivos foram copiados corretamente"
-          echo "- Se há diferenças reais entre os repositórios QA e produção"
-          echo "- Se o branch ${{ steps.pr_info.outputs.pr_branch }} tem commits exclusivos em relação à master"

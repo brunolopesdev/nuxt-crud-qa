@@ -1,14 +1,12 @@
 name: Sync to Production Repo
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - master
+  pull_request_review:
+    types: [submitted]
 
 jobs:
   sync-to-production:
-    if: github.event.pull_request.merged == true
+    if: github.event.review.state == 'approved'
     runs-on: ubuntu-latest
 
     steps:
@@ -26,7 +24,7 @@ jobs:
         id: pr_info
         run: |
           echo "pr_title=$(echo '${{ github.event.pull_request.title }}')" >> $GITHUB_OUTPUT
-          echo "pr_branch=$(echo '${{ github.head_ref }}')" >> $GITHUB_OUTPUT
+          echo "pr_branch=$(echo '${{ github.event.pull_request.head.ref }}')" >> $GITHUB_OUTPUT
           echo "pr_number=$(echo '${{ github.event.pull_request.number }}')" >> $GITHUB_OUTPUT
 
       - name: Add production repository as remote
@@ -35,11 +33,11 @@ jobs:
 
       - name: Create and push branch to production
         run: |
-          # Get the changes from the merged PR
-          git checkout ${{ github.head_ref }}
+          # Get the changes from the PR
+          git checkout ${{ github.event.pull_request.head.ref }}
 
           # Create the same branch in production repo
-          git push production ${{ github.head_ref }}:${{ github.head_ref }}
+          git push production ${{ github.event.pull_request.head.ref }}:${{ github.event.pull_request.head.ref }}
 
       - name: Create PR in production repository
         uses: peter-evans/create-pull-request@v5
@@ -59,6 +57,7 @@ jobs:
 
             Original PR: #${{ steps.pr_info.outputs.pr_number }}
             Original PR Title: ${{ steps.pr_info.outputs.pr_title }}
+            Approved by: ${{ github.event.review.user.login }}
           repository: brunolopesdev/nuxt-crud
         env:
           GITHUB_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}

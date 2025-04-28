@@ -26,7 +26,7 @@ jobs:
           echo "Files in current workspace:"
           ls -la
 
-      - name: Get changed files
+      - name: Get changed files and commits
         id: changed_files
         run: |
           # Ensure we have master branch for comparison
@@ -45,11 +45,21 @@ jobs:
           echo "Número de arquivos modificados: $CHANGED_FILES_COUNT"
           echo "changed_files_count=$CHANGED_FILES_COUNT" >> $GITHUB_OUTPUT
 
-          # Extract commit information from QA repository
+          # Extract commit information from QA repository - one commit per line
           echo "Extraindo informações dos commits do repositório QA"
-          git log --pretty=format:"%H||%s||%b" origin/master..HEAD > /tmp/qa_commits.txt
+          mkdir -p /tmp/qa_commits
+
+          # Get the list of commit hashes in reverse order (oldest first)
+          git log --reverse --format="%H" origin/master..HEAD > /tmp/qa_commit_hashes.txt
+
+          # Save each commit message to its own file to preserve newlines and formatting
+          cat /tmp/qa_commit_hashes.txt | while read hash; do
+            git show -s --format="%s" $hash > "/tmp/qa_commits/$hash.subject"
+            git show -s --format="%b" $hash > "/tmp/qa_commits/$hash.body"
+          done
+
           echo "Commits encontrados:"
-          cat /tmp/qa_commits.txt
+          cat /tmp/qa_commit_hashes.txt
 
       - name: Extract PR information
         id: pr_info
@@ -169,40 +179,54 @@ jobs:
             git add -A
 
             # Check if we have commit information from QA
-            if [ -f "/tmp/qa_commits.txt" ] && [ -s "/tmp/qa_commits.txt" ]; then
+            if [ -f "/tmp/qa_commit_hashes.txt" ] && [ -s "/tmp/qa_commit_hashes.txt" ]; then
               echo "Aplicando commits separados com as mensagens originais"
 
-              # Create a temporary git stash to hold all changes
-              git stash
+              # Create a single commit with all changes that contains all commit messages
+              COMBINED_MESSAGE="[Sync from QA] Multiple commits from PR #${{ steps.pr_info.outputs.pr_number }}\n\n"
+              COMMIT_COUNT=0
 
-              # Read each commit from the oldest to newest (reverse order)
-              tac /tmp/qa_commits.txt | while IFS='||' read -r hash subject body; do
-                if [ -z "$hash" ]; then
-                  continue
+              # Add all commit messages to the combined message
+              while read hash; do
+                COMMIT_COUNT=$((COMMIT_COUNT + 1))
+                SUBJECT=$(cat "/tmp/qa_commits/$hash.subject")
+                BODY=$(cat "/tmp/qa_commits/$hash.body")
+
+                # Format the commit message
+                COMBINED_MESSAGE="${COMBINED_MESSAGE}${hash:0:7}: ${SUBJECT}\n"
+                if [ -s "/tmp/qa_commits/$hash.body" ]; then
+                  COMBINED_MESSAGE="${COMBINED_MESSAGE}${BODY}\n\n"
+                else
+                  COMBINED_MESSAGE="${COMBINED_MESSAGE}\n"
                 fi
+              done < "/tmp/qa_commit_hashes.txt"
 
-                # For the first commit, apply all changes at once
-                if [ "$(git stash list | wc -l)" -gt 0 ]; then
-                  git stash pop
+              # Create a single commit with the combined message
+              git commit -m "$(echo -e "$COMBINED_MESSAGE")"
 
-                  # Add all changes
-                  git add -A
+              # Now create individual commits for each original commit
+              echo "Agora criando commits individuais para cada commit original"
 
-                  # Create commit with original message
-                  if [ -z "$body" ]; then
-                    git commit -m "[Sync from QA] $subject"
-                  else
-                    git commit -m "[Sync from QA] $subject" -m "$body"
-                  fi
-                fi
-              done
+              # Reset to the previous commit to prepare for individual commits
+              git reset HEAD~1
 
-              # If no commits were processed, create a single commit
-              if git diff --staged --quiet && [ "$(git stash list | wc -l)" -gt 0 ]; then
-                git stash pop
+              # Process each commit individually
+              while read hash; do
+                SUBJECT=$(cat "/tmp/qa_commits/$hash.subject")
+                BODY=$(cat "/tmp/qa_commits/$hash.body")
+
+                # Add all files for this commit
                 git add -A
-                git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
-              fi
+
+                # Create commit with original message
+                if [ -s "/tmp/qa_commits/$hash.body" ]; then
+                  # Use both subject and body if body exists
+                  git commit -m "[Sync from QA] $SUBJECT" -m "$BODY"
+                else
+                  # Use just the subject if no body
+                  git commit -m "[Sync from QA] $SUBJECT"
+                fi
+              done < "/tmp/qa_commit_hashes.txt"
             else
               echo "Nenhuma informação de commit encontrada, realizando commit único"
               git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
@@ -235,13 +259,11 @@ jobs:
           PR_BODY="**Automated PR created by GitHub Actions**\n\nThis PR was automatically created to sync changes from the QA repository.\n\nOriginal PR: #${{ steps.pr_info.outputs.pr_number }}\nOriginal PR Title: ${{ steps.pr_info.outputs.pr_title }}\nApproved by: ${{ github.event.review.user.login }}\n\n### Commit History\n"
 
           # Add commit history to PR body
-          if [ -f "/tmp/qa_commits.txt" ] && [ -s "/tmp/qa_commits.txt" ]; then
-            while IFS='||' read -r hash subject body; do
-              if [ -n "$hash" ]; then
-                SHORT_HASH=$(echo $hash | cut -c 1-7)
-                PR_BODY="$PR_BODY\n* $SHORT_HASH: $subject"
-              fi
-            done < "/tmp/qa_commits.txt"
+          if [ -f "/tmp/qa_commit_hashes.txt" ] && [ -s "/tmp/qa_commit_hashes.txt" ]; then
+            while read hash; do
+              SUBJECT=$(cat "/tmp/qa_commits/$hash.subject")
+              PR_BODY="$PR_BODY\n* ${hash:0:7}: $SUBJECT"
+            done < "/tmp/qa_commit_hashes.txt"
           fi
 
           if [ "$PR_EXISTS" -eq "0" ]; then

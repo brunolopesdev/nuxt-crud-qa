@@ -45,6 +45,12 @@ jobs:
           echo "Número de arquivos modificados: $CHANGED_FILES_COUNT"
           echo "changed_files_count=$CHANGED_FILES_COUNT" >> $GITHUB_OUTPUT
 
+          # Extract commit information from QA repository
+          echo "Extraindo informações dos commits do repositório QA"
+          git log --pretty=format:"%H||%s||%b" origin/master..HEAD > /tmp/qa_commits.txt
+          echo "Commits encontrados:"
+          cat /tmp/qa_commits.txt
+
       - name: Extract PR information
         id: pr_info
         run: |
@@ -126,7 +132,6 @@ jobs:
             echo "Nenhum arquivo alterado encontrado para copiar"
           fi
 
-
           # Method 2: Extract full snapshot and apply on top
           echo "Método 2: Aplicando snapshot completo do repositório QA"
           if [ -f "/tmp/qa_snapshot.tar.gz" ]; then
@@ -145,12 +150,13 @@ jobs:
             echo "Arquivo de snapshot não encontrado"
           fi
 
-          # Commit changes to production repository
-          echo "Commitando alterações no repositório de produção"
-          git add -A
-
           # Check if there are changes to commit
-          if git diff --staged --quiet; then
+          if git diff --staged --quiet && git status --porcelain | grep -q "^??"; then
+            # We have untracked files but no staged changes
+            git add -A
+          fi
+
+          if git diff --staged --quiet && ! git status --porcelain | grep -q "^??"; then
             echo "Nenhuma alteração detectada para commit"
 
             # Force a commit with a placeholder file to ensure we can create a PR
@@ -159,8 +165,48 @@ jobs:
             git add sync-from-qa.md
             git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
           else
-            echo "Alterações detectadas, realizando commit"
-            git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+            echo "Alterações detectadas, aplicando commits originais"
+            git add -A
+
+            # Check if we have commit information from QA
+            if [ -f "/tmp/qa_commits.txt" ] && [ -s "/tmp/qa_commits.txt" ]; then
+              echo "Aplicando commits separados com as mensagens originais"
+
+              # Create a temporary git stash to hold all changes
+              git stash
+
+              # Read each commit from the oldest to newest (reverse order)
+              tac /tmp/qa_commits.txt | while IFS='||' read -r hash subject body; do
+                if [ -z "$hash" ]; then
+                  continue
+                fi
+
+                # For the first commit, apply all changes at once
+                if [ "$(git stash list | wc -l)" -gt 0 ]; then
+                  git stash pop
+
+                  # Add all changes
+                  git add -A
+
+                  # Create commit with original message
+                  if [ -z "$body" ]; then
+                    git commit -m "[Sync from QA] $subject"
+                  else
+                    git commit -m "[Sync from QA] $subject" -m "$body"
+                  fi
+                fi
+              done
+
+              # If no commits were processed, create a single commit
+              if git diff --staged --quiet && [ "$(git stash list | wc -l)" -gt 0 ]; then
+                git stash pop
+                git add -A
+                git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+              fi
+            else
+              echo "Nenhuma informação de commit encontrada, realizando commit único"
+              git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+            fi
           fi
 
           # Push changes to production repository
@@ -184,8 +230,19 @@ jobs:
           PR_EXISTS=$(gh pr list --head ${{ steps.pr_info.outputs.pr_branch }} --json number | jq '. | length')
           echo "Resultado da verificação: $PR_EXISTS"
 
-          # Create the PR body as a single line with escaped newlines
-          PR_BODY="**Automated PR created by GitHub Actions**\n\nThis PR was automatically created to sync changes from the QA repository.\n\nOriginal PR: #${{ steps.pr_info.outputs.pr_number }}\nOriginal PR Title: ${{ steps.pr_info.outputs.pr_title }}\nApproved by: ${{ github.event.review.user.login }}"
+          # Create the PR body with commit history
+          echo "Gerando corpo da PR com histórico de commits"
+          PR_BODY="**Automated PR created by GitHub Actions**\n\nThis PR was automatically created to sync changes from the QA repository.\n\nOriginal PR: #${{ steps.pr_info.outputs.pr_number }}\nOriginal PR Title: ${{ steps.pr_info.outputs.pr_title }}\nApproved by: ${{ github.event.review.user.login }}\n\n### Commit History\n"
+
+          # Add commit history to PR body
+          if [ -f "/tmp/qa_commits.txt" ] && [ -s "/tmp/qa_commits.txt" ]; then
+            while IFS='||' read -r hash subject body; do
+              if [ -n "$hash" ]; then
+                SHORT_HASH=$(echo $hash | cut -c 1-7)
+                PR_BODY="$PR_BODY\n* $SHORT_HASH: $subject"
+              fi
+            done < "/tmp/qa_commits.txt"
+          fi
 
           if [ "$PR_EXISTS" -eq "0" ]; then
             echo "Criando nova PR no repositório de produção..."

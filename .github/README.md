@@ -13,8 +13,9 @@ Quando uma Pull Request é revisada e aprovada no repositório de QA, um workflo
 3. O workflow extrai as informações da PR original (título, número e branch)
 4. O workflow clona o repositório de produção e cria/atualiza a mesma branch
 5. As alterações são sincronizadas do repositório de QA para o de produção
-6. Uma nova PR é automaticamente criada no repositório de produção (se ainda não existir) com o mesmo título da PR original (prefixado com "[Sync from QA]")
-7. A descrição da PR incluirá o nome do revisor que aprovou a PR no repositório de QA
+6. O workflow verifica se existem diferenças entre a branch e master no repositório de produção
+7. Se houver diferenças, uma nova PR é automaticamente criada no repositório de produção (se ainda não existir)
+8. A descrição da PR incluirá o nome do revisor que aprovou a PR no repositório de QA
 
 ## Configuração
 
@@ -41,6 +42,8 @@ Para criar um PAT:
 - O workflow é acionado para cada aprovação de PR, mesmo antes dela ser mesclada no QA
 - Se você aprovar a mesma PR várias vezes, o workflow será executado novamente, mas não criará PRs duplicadas
 - Se não houver alterações entre as aprovações, o workflow detectará isso e não fará commits desnecessários
+- O workflow verifica se há commits entre a branch e master antes de tentar criar uma PR, evitando erros
+- Se não houver diferenças entre as branches, o workflow encerra sem criar uma PR e exibe uma mensagem explicativa
 - A PR criada no repositório de produção terá o mesmo título da PR original, prefixado com "[Sync from QA]"
 - A branch criada no repositório de produção terá o mesmo nome da branch original no repositório de QA
 - A descrição da PR incluirá referências à PR original e quem a aprovou

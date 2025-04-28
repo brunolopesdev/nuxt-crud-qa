@@ -40,6 +40,7 @@ jobs:
           git config user.email "actions@github.com"
 
       - name: Sync changes and create branch in production
+        id: sync_changes
         run: |
           # Check if we need to create a new branch
           export BRANCH_NAME="${{ steps.pr_info.outputs.pr_branch }}"
@@ -47,23 +48,44 @@ jobs:
 
           # Copy all files from QA repo to production repo
           echo "Syncing files between repositories..."
-          rsync -av --exclude='.git/' --exclude='.github/' . /tmp/prod-repo/
+          rsync -av --exclude='.git/' --exclude='.github/' --exclude='node_modules/' . /tmp/prod-repo/
 
           # Create branch and commit in production repo
           cd /tmp/prod-repo
-          git checkout -b $BRANCH_NAME || git checkout $BRANCH_NAME
+
+          # Check if branch exists in remote
+          if git ls-remote --heads origin $BRANCH_NAME | grep -q $BRANCH_NAME; then
+            echo "Branch exists in remote, checking it out"
+            git checkout $BRANCH_NAME
+            git pull origin $BRANCH_NAME
+          else
+            echo "Creating new branch"
+            git checkout -b $BRANCH_NAME
+          fi
 
           # Check if there are changes to commit
           if git diff --quiet && git diff --staged --quiet; then
             echo "No changes to commit"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
           else
             echo "Committing changes..."
             git add .
             git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
             git push origin $BRANCH_NAME
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+          # Check if there are commits between master and branch
+          COMMIT_COUNT=$(git rev-list --count master..$BRANCH_NAME)
+          echo "Commit count between master and $BRANCH_NAME: $COMMIT_COUNT"
+          if [ "$COMMIT_COUNT" -gt "0" ]; then
+            echo "has_commits=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_commits=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Create PR in production repository
+        if: steps.sync_changes.outputs.has_commits == 'true'
         env:
           GH_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
         run: |
@@ -91,3 +113,9 @@ jobs:
           else
             echo "PR already exists in production repository"
           fi
+
+      - name: Show info when no commits are available
+        if: steps.sync_changes.outputs.has_commits == 'false'
+        run: |
+          echo "Não há commits para criar uma PR. As branches master e ${{ steps.pr_info.outputs.pr_branch }} estão idênticas ou a branch de destino está à frente."
+          echo "O workflow foi concluído sem criar uma PR."

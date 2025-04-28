@@ -126,6 +126,7 @@ jobs:
             echo "Nenhum arquivo alterado encontrado para copiar"
           fi
 
+
           # Method 2: Extract full snapshot and apply on top
           echo "Método 2: Aplicando snapshot completo do repositório QA"
           if [ -f "/tmp/qa_snapshot.tar.gz" ]; then

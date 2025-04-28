@@ -18,9 +18,9 @@ jobs:
       - name: Criar PR no repositório de produção
         uses: repo-sync/pull-request@v2
         with:
-          source_branch: main  # A branch de origem é a main
-          destination_repository: "https://github.com/brunolopesdev/nuxt-crud" # <-- ajuste aqui para o repo de produção
-          destination_branch: "main"
+          source_branch: master  # A branch de origem é a main
+          destination_repository: "brunolopesdev/nuxt-crud" # <-- ajuste aqui para o repo de produção
+          destination_branch: "master"
           pr_title: "${{ github.event.pull_request.title }}" # mesmo título da PR original
           pr_body: |
             **Replicação automática da PR aprovada em QA**

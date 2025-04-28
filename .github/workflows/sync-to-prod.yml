@@ -155,14 +155,12 @@ jobs:
           # Check if there are changes to commit after git add
           if git diff --cached --quiet; then
             echo "Nenhuma alteração detectada para commit"
-
-            # Force a commit with a placeholder file to ensure we can create a PR
-            echo "Criando commit placeholder para garantir a criação da PR"
-            echo "Esta é uma sincronização automática da PR #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}" > sync-from-qa.md
-            git add sync-from-qa.md
-            git commit -m "[Sync from QA] ${{ steps.pr_info.outputs.pr_title }} (#${{ steps.pr_info.outputs.pr_number }})"
+            echo "Não há alterações para sincronizar"
+            echo "HAS_CHANGES=false" >> $GITHUB_OUTPUT
+            exit 0
           else
             echo "Alterações detectadas, aplicando commits originais"
+            echo "HAS_CHANGES=true" >> $GITHUB_OUTPUT
 
             # Check if we have commit information from QA
             if [ -f "/tmp/qa_commit_hashes.txt" ] && [ -s "/tmp/qa_commit_hashes.txt" ]; then
@@ -202,20 +200,21 @@ jobs:
               echo "Nenhuma informação de commit encontrada, realizando commit único"
               git commit -m "[Sync from QA] ${{ steps.pr_info.outputs.pr_title }} (#${{ steps.pr_info.outputs.pr_number }})"
             fi
+
+            # Push changes to production repository
+            echo "Pushing changes to production branch: $BRANCH_NAME"
+            git push origin $BRANCH_NAME
+
+            # Verify the branch has commits compared to master
+            git fetch origin master
+            COMMIT_COUNT=$(git rev-list --count origin/master..$BRANCH_NAME)
+            echo "Número de commits entre master e $BRANCH_NAME: $COMMIT_COUNT"
           fi
-
-          # Push changes to production repository
-          echo "Pushing changes to production branch: $BRANCH_NAME"
-          git push origin $BRANCH_NAME
-
-          # Verify the branch has commits compared to master
-          git fetch origin master
-          COMMIT_COUNT=$(git rev-list --count origin/master..$BRANCH_NAME)
-          echo "Número de commits entre master e $BRANCH_NAME: $COMMIT_COUNT"
 
           echo "SUCCESS=true" >> $GITHUB_OUTPUT
 
       - name: Create PR in production repository
+        if: steps.apply_changes.outputs.HAS_CHANGES == 'true'
         env:
           GH_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}
         run: |
@@ -252,3 +251,9 @@ jobs:
           else
             echo "PR já existe no repositório de produção"
           fi
+
+      - name: Show message when no changes detected
+        if: steps.apply_changes.outputs.HAS_CHANGES == 'false'
+        run: |
+          echo "Não foram detectadas alterações para sincronizar do repositório QA para produção."
+          echo "Nenhuma PR será criada."

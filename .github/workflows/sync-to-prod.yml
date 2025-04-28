@@ -129,21 +129,8 @@ jobs:
             git checkout -b $BRANCH_NAME
           fi
 
-          # Apply changes using two methods
-
-          # Method 1: Copy specific changed files
-          echo "Método 1: Copiando arquivos específicos que foram alterados"
-          if [ -d "/tmp/changed_content" ] && [ "$(ls -A /tmp/changed_content)" ]; then
-            echo "Copiando arquivos alterados para o repositório de produção"
-            cp -R /tmp/changed_content/. .
-            echo "Verificando arquivos copiados:"
-            git status --porcelain
-          else
-            echo "Nenhum arquivo alterado encontrado para copiar"
-          fi
-
-          # Method 2: Extract full snapshot and apply on top
-          echo "Método 2: Aplicando snapshot completo do repositório QA"
+          # Method: Extract full snapshot and apply on top
+          echo "Aplicando snapshot completo do repositório QA"
           if [ -f "/tmp/qa_snapshot.tar.gz" ]; then
             echo "Extraindo snapshot e aplicando no repositório de produção"
 
@@ -158,6 +145,7 @@ jobs:
             git status --porcelain
           else
             echo "Arquivo de snapshot não encontrado"
+            exit 1
           fi
 
           # Check if there are changes to commit
@@ -176,59 +164,46 @@ jobs:
             git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
           else
             echo "Alterações detectadas, aplicando commits originais"
-            git add -A
 
             # Check if we have commit information from QA
             if [ -f "/tmp/qa_commit_hashes.txt" ] && [ -s "/tmp/qa_commit_hashes.txt" ]; then
               echo "Aplicando commits separados com as mensagens originais"
 
-              # Create a single commit with all changes that contains all commit messages
-              COMBINED_MESSAGE="[Sync from QA] Multiple commits from PR #${{ steps.pr_info.outputs.pr_number }}\n\n"
-              COMMIT_COUNT=0
+              # Count commits
+              COMMIT_COUNT=$(wc -l < /tmp/qa_commit_hashes.txt)
+              echo "Número de commits a serem aplicados: $COMMIT_COUNT"
 
-              # Add all commit messages to the combined message
-              while read hash; do
-                COMMIT_COUNT=$((COMMIT_COUNT + 1))
-                SUBJECT=$(cat "/tmp/qa_commits/$hash.subject")
-                BODY=$(cat "/tmp/qa_commits/$hash.body")
+              # If we have just one commit, apply it directly
+              if [ "$COMMIT_COUNT" -eq 1 ]; then
+                HASH=$(cat /tmp/qa_commit_hashes.txt)
+                SUBJECT=$(cat "/tmp/qa_commits/$HASH.subject")
+                BODY=$(cat "/tmp/qa_commits/$HASH.body")
 
-                # Format the commit message
-                COMBINED_MESSAGE="${COMBINED_MESSAGE}${hash:0:7}: ${SUBJECT}\n"
-                if [ -s "/tmp/qa_commits/$hash.body" ]; then
-                  COMBINED_MESSAGE="${COMBINED_MESSAGE}${BODY}\n\n"
-                else
-                  COMBINED_MESSAGE="${COMBINED_MESSAGE}\n"
-                fi
-              done < "/tmp/qa_commit_hashes.txt"
-
-              # Create a single commit with the combined message
-              git commit -m "$(echo -e "$COMBINED_MESSAGE")"
-
-              # Now create individual commits for each original commit
-              echo "Agora criando commits individuais para cada commit original"
-
-              # Reset to the previous commit to prepare for individual commits
-              git reset HEAD~1
-
-              # Process each commit individually
-              while read hash; do
-                SUBJECT=$(cat "/tmp/qa_commits/$hash.subject")
-                BODY=$(cat "/tmp/qa_commits/$hash.body")
-
-                # Add all files for this commit
                 git add -A
-
-                # Create commit with original message
-                if [ -s "/tmp/qa_commits/$hash.body" ]; then
-                  # Use both subject and body if body exists
+                if [ -s "/tmp/qa_commits/$HASH.body" ]; then
                   git commit -m "[Sync from QA] $SUBJECT" -m "$BODY"
                 else
-                  # Use just the subject if no body
                   git commit -m "[Sync from QA] $SUBJECT"
                 fi
-              done < "/tmp/qa_commit_hashes.txt"
+              else
+                # If we have multiple commits, create a single commit that mentions all of them
+                echo "Múltiplos commits detectados ($COMMIT_COUNT), criando commit único com referências"
+
+                # Create commit message with all original commits
+                COMMIT_MSG="[Sync from QA] Multiple commits from PR #${{ steps.pr_info.outputs.pr_number }}:\n\n"
+
+                while read HASH; do
+                  SUBJECT=$(cat "/tmp/qa_commits/$HASH.subject")
+                  COMMIT_MSG="${COMMIT_MSG}* ${HASH:0:7}: $SUBJECT\n"
+                done < "/tmp/qa_commit_hashes.txt"
+
+                # Add all files and create single commit
+                git add -A
+                git commit -m "$(echo -e "$COMMIT_MSG")"
+              fi
             else
               echo "Nenhuma informação de commit encontrada, realizando commit único"
+              git add -A
               git commit -m "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
             fi
           fi

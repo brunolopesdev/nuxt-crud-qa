@@ -1,0 +1,64 @@
+name: Sync to Production Repo
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - master
+
+jobs:
+  sync-to-production:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout QA repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for all branches and tags
+
+      - name: Set up Git config
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+
+      - name: Extract PR information
+        id: pr_info
+        run: |
+          echo "pr_title=$(echo '${{ github.event.pull_request.title }}')" >> $GITHUB_OUTPUT
+          echo "pr_branch=$(echo '${{ github.head_ref }}')" >> $GITHUB_OUTPUT
+          echo "pr_number=$(echo '${{ github.event.pull_request.number }}')" >> $GITHUB_OUTPUT
+
+      - name: Add production repository as remote
+        run: |
+          git remote add production https://${{ secrets.API_TOKEN_GITHUB }}@github.com/brunolopesdev/nuxt-crud.git
+
+      - name: Create and push branch to production
+        run: |
+          # Get the changes from the merged PR
+          git checkout ${{ github.head_ref }}
+
+          # Create the same branch in production repo
+          git push production ${{ github.head_ref }}:${{ github.head_ref }}
+
+      - name: Create PR in production repository
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.API_TOKEN_GITHUB }}
+          path: .
+          commit-message: "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+          committer: GitHub Actions Bot <actions@github.com>
+          author: GitHub Actions Bot <actions@github.com>
+          branch: ${{ steps.pr_info.outputs.pr_branch }}
+          base: master
+          title: "[Sync from QA] #${{ steps.pr_info.outputs.pr_number }}: ${{ steps.pr_info.outputs.pr_title }}"
+          body: |
+            **Automated PR created by GitHub Actions**
+
+            This PR was automatically created to sync changes from the QA repository.
+
+            Original PR: #${{ steps.pr_info.outputs.pr_number }}
+            Original PR Title: ${{ steps.pr_info.outputs.pr_title }}
+          repository: brunolopesdev/nuxt-crud
+        env:
+          GITHUB_TOKEN: ${{ secrets.API_TOKEN_GITHUB }}

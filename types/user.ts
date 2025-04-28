@@ -6,3 +6,9 @@ export interface User {
   email: string
   grupo: string
 }
+
+export interface UserGroup {
+  id: number
+  nome: string
+}
+
